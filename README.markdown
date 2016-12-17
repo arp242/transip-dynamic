@@ -1,3 +1,5 @@
+[![This project is considered experimental](https://img.shields.io/badge/Status-experimental-red.svg)](https://arp242.net/status/experimental)
+
 Dynamic DNS for TransIP.
 
 For a very long time I was a happy [XS4ALL](https://www.xs4all.nl/) customer
@@ -6,8 +8,8 @@ with a static IP address, custom reverse DNS, and all sorts of fancy shit.
 Then I moved to a country which doesn't seem to have decent ISPs, and now my IP
 address changes every week.
 
-I'd like to keep my home address accessible from the public internet. You need
-know when you might want to `ssh` home. So I wrote a script to automatically
+I'd like to keep my home address accessible from the public internet. You never
+know when you might want to phone home. So I wrote a script to automatically
 update the records.
 
 How to use it
@@ -30,4 +32,4 @@ How to use it
 Alternatives
 ============
 * [transip-dyndns](https://github.com/RolfKoenders/transip-dyndns) (deals poorly
-  with A and AAAA record; can only set one domain, node.js).
+  with A and AAAA records; can only set one domain, node.js).
