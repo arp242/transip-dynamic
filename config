@@ -1,0 +1,18 @@
+# Your username
+user User
+
+# Private key generated in the TransIP control panel; remember to disable
+# whitelisting since your IP will change!
+key-file priv.pem
+
+# TransIP maintains several different domains; you'll need to use the correct
+# one here (e.g. api.transip.eu, api.transip.co.uk, etc.)
+api api.transip.nl
+
+# We need an external service to determine the public IP address.
+get-ip icanhazip.com
+
+# Records you want to update.
+record example.com
+record sub.example.com
+record another.example.net
