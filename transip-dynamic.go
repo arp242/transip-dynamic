@@ -1,4 +1,4 @@
-// Copyright © 2016 Martin Tournoij <martin@arp242.net>
+// Copyright © 2016-2017 Martin Tournoij <martin@arp242.net>
 // See the bottom of this file for the full copyright notice.
 package main
 
@@ -89,7 +89,6 @@ func fatal(err error) {
 	if err == nil {
 		return
 	}
-
 	fmt.Fprintf(os.Stderr, "transip-dynamic error: %v\n", err)
 	os.Exit(1)
 }
@@ -163,12 +162,12 @@ func updateDomains() error {
 	for domain, records := range config.Records {
 		info, err := getDomain(domain)
 		if err != nil {
-			return err
+			return fmt.Errorf("cannot get domain %v: %v", domain, err)
 		}
 
 		err = updateDomain(domain, records, info, *ip)
 		if err != nil {
-			return err
+			return fmt.Errorf("cannot update domain %v: %v", domain, err)
 		}
 	}
 
@@ -183,15 +182,35 @@ func getIP() (*ipT, error) {
 	}
 
 	get := func(a string) (string, error) {
-		resp, err := http.Get(fmt.Sprintf("http://[%v]", a))
+		client := http.Client{Timeout: 5 * time.Second}
+		req, err := http.NewRequest("GET", fmt.Sprintf("http://[%v]", a), nil)
 		if err != nil {
 			return "", err
 		}
+
+		req.Header.Add("User-Agent", "curl/7.54.0")
+		req.Header.Add("Host", config.GetIP)
+		req.Header.Add("Accept", "*/*")
+		req.Host = config.GetIP
+		resp, err := client.Do(req)
+		if err != nil {
+			return "", fmt.Errorf("cannot read IP: %v", err)
+		}
 		defer resp.Body.Close()
+
+		if resp.StatusCode != 200 {
+			return "", fmt.Errorf("wrong status code at %v: %v %v",
+				a, resp.StatusCode, resp.Status)
+		}
 
 		d, err := ioutil.ReadAll(resp.Body)
 		if err != nil {
 			return "", err
+		}
+
+		// Almost certainly wrong!
+		if len(d) > 100 {
+			return "", fmt.Errorf("data from %v is far too long; bailing out", a)
 		}
 
 		return strings.TrimSpace(string(d)), nil
@@ -203,14 +222,20 @@ func getIP() (*ipT, error) {
 		hasC := strings.Contains(a, ":")
 		if ip.IPv6 == "" && hasC {
 			addr, err := get(a)
-			if err == nil {
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "transip-dynamic warning: cannot find IPv4 address: %v\n",
+					err)
+			} else {
 				ip.IPv6 = addr
 			}
 		}
 
 		if ip.IPv4 == "" && !hasC {
 			addr, err := get(a)
-			if err == nil {
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "transip-dynamic warning: cannot find IPv6 address: %v\n",
+					err)
+			} else {
 				ip.IPv4 = addr
 			}
 		}
@@ -218,6 +243,11 @@ func getIP() (*ipT, error) {
 		if ip.IPv4 != "" && ip.IPv6 != "" {
 			break
 		}
+	}
+
+	if ip.IPv4 == "" && ip.IPv6 == "" {
+		fmt.Fprintf(os.Stderr, "transip-dynamic error: no IP addresses found\n")
+		os.Exit(1)
 	}
 
 	return ip, nil
@@ -455,7 +485,7 @@ type DNSEntries struct {
 
 // The MIT License (MIT)
 //
-// Copyright © 2016 Martin Tournoij
+// Copyright © 2016-2017 Martin Tournoij
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to

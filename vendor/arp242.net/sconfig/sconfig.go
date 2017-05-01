@@ -1,44 +1,51 @@
+// Copyright © 2016-2017 Martin Tournoij
+// See the bottom of this file for the full copyright.
+
 // Package sconfig is a simple yet functional configuration file parser.
 //
 // See the README.markdown for an introduction.
-package sconfig
+package sconfig // import "arp242.net/sconfig"
 
 import (
 	"bufio"
-	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"unicode"
-
-	"bitbucket.org/pkg/inflect"
 )
 
-// TypeHandler is passed the line split by whitespace and with the option name
-// removed. It is expected to return the value to set it to or an error.
+var (
+	// typeHandlers are all the registered type handlers.
+	//
+	// The key is the name of the type, the value the list of handler functions
+	// to run.
+	typeHandlers = make(map[string][]TypeHandler)
+)
+
+// TypeHandler takes the field to set and the value to set it to. It is expected
+// to return the value to set it to.
 type TypeHandler func([]string) (interface{}, error)
 
-// Handlers can be used to run custom code for a field.
-//
-// The map key is the name of the field in the struct.
-//
-// The function takes the unprocessed line split by whitespace and with the
-// option name removed, it is expected to set a field directly.
-//
-// There is no return value, the function is expected to set any settings on the
-// config struct.
-type Handlers map[string]func([]string) error
+// Handler functions can be used to run special code for a field. The function
+// takes the unprocessed line split by whitespace and with the option name
+// removed.
+type Handler func([]string) error
 
-var typeHandlers = make(map[string][]TypeHandler)
+// Handlers can be used to run special code for a field. The map key is the name
+// of the field in the struct.
+type Handlers map[string]Handler
 
-// RegisterType sets one or more handler functions for a type.
+// RegisterType sets the type handler functions for a type. Existing handlers
+// are always overridden (it doesn't add to the list!)
 //
-// If there are multiple types they are run in order, each passing the output to
-// the next unless there is an error. This is useful to normalize or validate
-// data.
-func RegisterType(typeName string, fun ...TypeHandler) {
-	typeHandlers[typeName] = fun
+// The handlers are chained; the return value is passed to the next one. The
+// chain is stopped if one handler returns a non-nil error. This is particularly
+// useful for validation (see ValidateSingleValue() and ValidateValueLimit() for
+// examples).
+func RegisterType(typ string, fun ...TypeHandler) {
+	typeHandlers[typ] = fun
 }
 
 // readFile will read a file, strip comments, and collapse indents. This also
@@ -158,17 +165,39 @@ func collapseWhitespace(line string) string {
 	return nl
 }
 
-// Parse will reads file from disk and populates the given config struct c.
+// MustParse behaves like Parse, but panics if there is an error.
+func MustParse(c interface{}, file string, handlers Handlers) {
+	err := Parse(c, file, handlers)
+	if err != nil {
+		panic(err)
+	}
+}
+
+// Parse will reads file from disk and populates the given config struct.
 //
-// The Handlers map can be given to customize the the behaviour; see the
-// documentation on the Handlers type for details.
-func Parse(c interface{}, file string, handlers Handlers) error {
+// The Handlers map can be given to customize the behaviour for individual
+// configuration keys. This will override the type handler (if any).
+//
+// The function is expected to set any settings on the struct; for example:
+//
+//  Parse(&config, "config", Handlers{
+//      "Bool": func(line []string) error {
+//          if line[0] == "yup" {
+//              config.Bool = true
+//          }
+//          return nil
+//       },
+//  })
+//
+// Returned errors will abort parsing and set the error as the return value for
+// Parse().
+func Parse(config interface{}, file string, handlers Handlers) error {
 	lines, err := readFile(file)
 	if err != nil {
 		return err
 	}
 
-	values := reflect.ValueOf(c).Elem()
+	values := getValues(config)
 
 	// Get list of rule names from tags
 	for _, line := range lines {
@@ -190,7 +219,7 @@ func Parse(c interface{}, file string, handlers Handlers) error {
 			continue
 		}
 
-		// Set from typehandler
+		// Set from type handler
 		if has, err := setFromTypeHandler(&field, v[1:]); has {
 			if err != nil {
 				return fmterr(file, line[0], v[0], err)
@@ -207,15 +236,34 @@ func Parse(c interface{}, file string, handlers Handlers) error {
 	return nil
 }
 
+func getValues(c interface{}) reflect.Value {
+	// Make sure we give a sane error here when accidentally passing in a
+	// non-pointer, since the default is not all that helpful:
+	//     panic: reflect: call of reflect.Value.Elem on struct Value
+	defer func() {
+		err := recover()
+		if err != nil {
+			switch err.(type) {
+			case *reflect.ValueError:
+				panic(fmt.Errorf(
+					"unable to get values of the config struct (did you pass it as a pointer?): %v",
+					err))
+			default:
+				panic(err)
+			}
+		}
+	}()
+	return reflect.ValueOf(c).Elem()
+}
+
 func fmterr(file, line, key string, err error) error {
 	return fmt.Errorf("%v line %v: error parsing %s: %v",
 		file, line, key, err)
 }
 
 func fieldNameFromKey(key string, values reflect.Value) (string, error) {
-	fieldName := inflect.Camelize(key)
+	fieldName := inflect.camelize(key)
 
-	// TODO: Maybe find better inflect package that deals with this already?
 	// This list is from golint
 	acr := []string{"Api", "Ascii", "Cpu", "Css", "Dns", "Eof", "Guid", "Html",
 		"Https", "Http", "Id", "Ip", "Json", "Lhs", "Qps", "Ram", "Rhs",
@@ -229,7 +277,7 @@ func fieldNameFromKey(key string, values reflect.Value) (string, error) {
 	field := values.FieldByName(fieldName)
 	if !field.CanAddr() {
 		// Check plural version too; we're not too fussy
-		fieldNamePlural := inflect.Pluralize(fieldName)
+		fieldNamePlural := inflect.togglePlural(fieldName)
 		field = values.FieldByName(fieldNamePlural)
 		if !field.CanAddr() {
 			return "", fmt.Errorf("unknown option (field %s or %s is missing)",
@@ -279,32 +327,31 @@ func setFromTypeHandler(field *reflect.Value, value []string) (bool, error) {
 	return true, nil
 }
 
-// MustParse behaves like Parse, but panics if there is an error.
-func MustParse(c interface{}, file string, handlers Handlers) {
-	err := Parse(c, file, handlers)
-	if err != nil {
-		panic(err)
-	}
-}
-
-// FindConfig tries to find a config file at the usual locations (in this
-// order):
+// FindConfig tries to find a configuration file at the usual locations.
 //
-//   $XDG_CONFIG/file (if $XDG_CONFIG is set)
-//   $HOME/.config/$file
+// The following paths are checked (in this order):
+//
+//   $XDG_CONFIG/$file
 //   $HOME/.$file
 //   /etc/$file
 //   /usr/local/etc/$file
 //   /usr/pkg/etc/$file
 //   ./$file
+//
+// The default for $XDG_CONFIG if unset is $HOME/.config
 func FindConfig(file string) string {
 	file = strings.TrimLeft(file, "/")
 
 	locations := []string{}
-	if xdg := os.Getenv("XDG_CONFIG"); xdg != "" {
-		locations = append(locations, strings.TrimRight(xdg, "/")+"/"+file)
+	xdg := os.Getenv("XDG_CONFIG")
+	if xdg != "" {
+		locations = append(locations, filepath.Join(xdg, file))
 	}
 	if home := os.Getenv("HOME"); home != "" {
+		if xdg == "" {
+			locations = append(locations, filepath.Join(
+				os.Getenv("HOME"), "/.config/", file))
+		}
 		locations = append(locations, home+"/."+file)
 	}
 
@@ -324,41 +371,9 @@ func FindConfig(file string) string {
 	return ""
 }
 
-// OneValue checks if v only has a single value. It's useful to validate a
-// typeHandler:
-//
-//   sconfig.RegisterType("*regexp.Regexp", sconfig.OneValue, func(v []string) (interface{}, error) {
-//      ...
-//   })
-func OneValue(v []string) (interface{}, error) {
-	if len(v) != 1 {
-		return nil, errors.New("must have exactly one value")
-	}
-	return v, nil
-}
-
-// OneValues checks if v'slength is between min and max. It's useful to validate
-// a typeHandler:
-//
-//   sconfig.RegisterType("*regexp.Regexp", sconfig.NValue(2, 3), func(v []string) (interface{}, error) {
-//       ...
-//   })
-func NValues(min, max int) TypeHandler {
-	return func(v []string) (interface{}, error) {
-		switch {
-		case min > 0 && len(v) < min:
-			return nil, fmt.Errorf("must have more than %v values (has: %v)", min, len(v))
-		case max > 0 && len(v) > max:
-			return nil, fmt.Errorf("must have fewer than %v values (has: %v)", max, len(v))
-		default:
-			return v, nil
-		}
-	}
-}
-
 // The MIT License (MIT)
 //
-// Copyright © 2016 Martin Tournoij
+// Copyright © 2016-2017 Martin Tournoij
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to

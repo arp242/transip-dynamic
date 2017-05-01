@@ -1,3 +1,6 @@
+// Copyright © 2016-2017 Martin Tournoij
+// See the bottom of this file for the full copyright.
+
 package sconfig
 
 import (
@@ -6,24 +9,26 @@ import (
 	"strings"
 )
 
+// This file contains the default handler functions for Go's primitives.
+
 func init() {
 	defaultTypeHandlers()
 }
 
 func defaultTypeHandlers() {
 	typeHandlers = map[string][]TypeHandler{
-		"string":    {OneValue, handleString},
-		"bool":      {OneValue, handleBool},
-		"float32":   {OneValue, handleFloat32},
-		"float64":   {OneValue, handleFloat64},
-		"int64":     {OneValue, handleInt64},
-		"uint64":    {OneValue, handleUint64},
-		"[]string":  {NValues(1, 0), handleStringSlice},
-		"[]bool":    {NValues(1, 0), handleBoolSlice},
-		"[]float32": {NValues(1, 0), handleFloat32Slice},
-		"[]float64": {NValues(1, 0), handleFloat64Slice},
-		"[]int64":   {NValues(1, 0), handleInt64Slice},
-		"[]uint64":  {NValues(1, 0), handleUint64Slice},
+		"string":    {ValidateSingleValue(), handleString},
+		"bool":      {ValidateSingleValue(), handleBool},
+		"float32":   {ValidateSingleValue(), handleFloat32},
+		"float64":   {ValidateSingleValue(), handleFloat64},
+		"int64":     {ValidateSingleValue(), handleInt64},
+		"uint64":    {ValidateSingleValue(), handleUint64},
+		"[]string":  {ValidateValueLimit(1, 0), handleStringSlice},
+		"[]bool":    {ValidateValueLimit(1, 0), handleBoolSlice},
+		"[]float32": {ValidateValueLimit(1, 0), handleFloat32Slice},
+		"[]float64": {ValidateValueLimit(1, 0), handleFloat64Slice},
+		"[]int64":   {ValidateValueLimit(1, 0), handleInt64Slice},
+		"[]uint64":  {ValidateValueLimit(1, 0), handleUint64Slice},
 	}
 }
 
@@ -32,7 +37,7 @@ func handleString(v []string) (interface{}, error) {
 }
 
 func handleBool(v []string) (interface{}, error) {
-	r, err := parseBool(v[0])
+	r, err := parseBool(strings.Join(v, ""))
 	if err != nil {
 		return nil, err
 	}
@@ -41,9 +46,9 @@ func handleBool(v []string) (interface{}, error) {
 
 func parseBool(v string) (bool, error) {
 	switch strings.ToLower(v) {
-	case "1", "t", "true", "yes", "on", "enable", "enabled":
+	case "1", "true", "yes", "on", "enable", "enabled":
 		return true, nil
-	case "0", "f", "false", "no", "off", "disable", "disabled":
+	case "0", "false", "no", "off", "disable", "disabled":
 		return false, nil
 	default:
 		return false, fmt.Errorf(`unable to parse "%s" as a boolean`, v)
@@ -51,14 +56,14 @@ func parseBool(v string) (bool, error) {
 }
 
 func handleFloat32(v []string) (interface{}, error) {
-	r, err := strconv.ParseFloat(v[0], 32)
+	r, err := strconv.ParseFloat(strings.Join(v, ""), 32)
 	if err != nil {
 		return nil, err
 	}
 	return float32(r), nil
 }
 func handleFloat64(v []string) (interface{}, error) {
-	r, err := strconv.ParseFloat(v[0], 64)
+	r, err := strconv.ParseFloat(strings.Join(v, ""), 64)
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +71,7 @@ func handleFloat64(v []string) (interface{}, error) {
 }
 
 func handleInt64(v []string) (interface{}, error) {
-	r, err := strconv.ParseInt(v[0], 10, 64)
+	r, err := strconv.ParseInt(strings.Join(v, ""), 10, 64)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +79,7 @@ func handleInt64(v []string) (interface{}, error) {
 }
 
 func handleUint64(v []string) (interface{}, error) {
-	r, err := strconv.ParseUint(v[0], 10, 64)
+	r, err := strconv.ParseUint(strings.Join(v, ""), 10, 64)
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +152,7 @@ func handleUint64Slice(v []string) (interface{}, error) {
 
 // The MIT License (MIT)
 //
-// Copyright © 2016 Martin Tournoij
+// Copyright © 2016-2017 Martin Tournoij
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to

@@ -6,7 +6,7 @@ user User
 key-file priv.pem
 
 # TransIP maintains several different domains; you'll need to use the correct
-# one here (e.g. api.transip.eu, api.transip.co.uk, etc.)
+# one here (e.g. api.transip.nl, api.transip.eu, etc.)
 api api.transip.nl
 
 # We need an external service to determine the public IP address.

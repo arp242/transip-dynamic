@@ -1,0 +1,13 @@
+{
+	"comment": "",
+	"ignore": "test",
+	"package": [
+		{
+			"checksumSHA1": "cIs9mDlora8PRjua41r92X9/ITQ=",
+			"path": "arp242.net/sconfig",
+			"revision": "30d68fa9cdfcc9964790d2b4c0498e6156a0d5d2",
+			"revisionTime": "2017-04-29T17:29:10Z"
+		}
+	],
+	"rootPath": "arp242.net/transip-dynamic"
+}
