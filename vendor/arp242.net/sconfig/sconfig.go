@@ -8,6 +8,7 @@ package sconfig // import "arp242.net/sconfig"
 
 import (
 	"bufio"
+	"encoding"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -165,7 +166,7 @@ func collapseWhitespace(line string) string {
 	return nl
 }
 
-// MustParse behaves like Parse, but panics if there is an error.
+// MustParse behaves like Parse(), but panics if there is an error.
 func MustParse(c interface{}, file string, handlers Handlers) {
 	err := Parse(c, file, handlers)
 	if err != nil {
@@ -173,25 +174,54 @@ func MustParse(c interface{}, file string, handlers Handlers) {
 	}
 }
 
-// Parse will reads file from disk and populates the given config struct.
+// sconfig will intercept panic()s and return them as an error, which is much
+// better for most general usage.
+// For development it might be useful to disable this though.
+var dontPanic = true
+
+// Parse reads the file from disk and populates the given config struct.
 //
-// The Handlers map can be given to customize the behaviour for individual
-// configuration keys. This will override the type handler (if any).
+// A line is matched with a struct field by "camelizing" the first word. For
+// example "key-name" becomes "KeyName". You can also use the plural
+// ("KeyNames") as the field name.
 //
-// The function is expected to set any settings on the struct; for example:
+// sconfig will attempt to set the field from the passed Handlers map (see
+// below), a configured type handler, or the encoding.TextUnmarshaler interface,
+// in that order.
+//
+// The Handlers map, which may be nil, can be given to customize the behaviour
+// for individual configuration keys. This will override the type handler (if
+// any). The function is expected to set any settings on the struct; for
+// example:
 //
 //  Parse(&config, "config", Handlers{
-//      "Bool": func(line []string) error {
-//          if line[0] == "yup" {
+//      "SpecialBool": func(line []string) error {
+//          if line[0] == "yup!" {
 //              config.Bool = true
 //          }
 //          return nil
 //       },
 //  })
 //
-// Returned errors will abort parsing and set the error as the return value for
-// Parse().
-func Parse(config interface{}, file string, handlers Handlers) error {
+// Will allow you to do:
+//
+//   special-bool yup!
+func Parse(config interface{}, file string, handlers Handlers) (returnErr error) {
+	// Recover from panics; return them as errors!
+	// TODO: This loses the stack though...
+	defer func() {
+		if dontPanic {
+			if rec := recover(); rec != nil {
+				switch recType := rec.(type) {
+				case error:
+					returnErr = recType
+				default:
+					panic(rec)
+				}
+			}
+		}
+	}()
+
 	lines, err := readFile(file)
 	if err != nil {
 		return err
@@ -204,14 +234,33 @@ func Parse(config interface{}, file string, handlers Handlers) error {
 		// Split by spaces
 		v := strings.Split(line[1], " ")
 
-		// Infer the field name from the key
-		fieldName, err := fieldNameFromKey(v[0], values)
-		if err != nil {
-			return fmterr(file, line[0], v[0], err)
-		}
-		field := values.FieldByName(fieldName)
+		var field reflect.Value
+		var fieldName string
 
-		// Use the handler if it exists
+		switch values.Kind() {
+
+		// TODO: Only support map[string][]string atm.
+		case reflect.Map:
+			fieldName = v[0]
+			mapKey := reflect.ValueOf(v[0]).Convert(reflect.TypeOf(fieldName))
+			values.SetMapIndex(mapKey, reflect.ValueOf(v[1:]))
+
+			continue
+
+		case reflect.Struct:
+			// Infer the field name from the key
+			var err error
+			fieldName, err = fieldNameFromKey(v[0], values)
+			if err != nil {
+				return fmterr(file, line[0], v[0], err)
+			}
+			field = values.FieldByName(fieldName)
+
+		default:
+			return fmt.Errorf("unknown type: %v", values.Kind())
+		}
+
+		// Use the handler if it exists.
 		if has, err := setFromHandler(fieldName, v[1:], handlers); has {
 			if err != nil {
 				return fmterr(file, line[0], v[0], err)
@@ -219,8 +268,22 @@ func Parse(config interface{}, file string, handlers Handlers) error {
 			continue
 		}
 
-		// Set from type handler
+		// Set from type handler.
 		if has, err := setFromTypeHandler(&field, v[1:]); has {
+			if err != nil {
+				return fmterr(file, line[0], v[0], err)
+			}
+			continue
+		}
+
+		// Set from encoding.TextUnmarshaler.
+		if m, ok := field.Interface().(encoding.TextUnmarshaler); ok {
+			if field.IsNil() {
+				field.Set(reflect.New(field.Type().Elem()))
+				m = field.Interface().(encoding.TextUnmarshaler)
+			}
+
+			err := m.UnmarshalText([]byte(strings.Join(v[1:], " ")))
 			if err != nil {
 				return fmterr(file, line[0], v[0], err)
 			}
@@ -233,7 +296,24 @@ func Parse(config interface{}, file string, handlers Handlers) error {
 			field.Type().String()))
 	}
 
-	return nil
+	return returnErr // Can be set by defer
+}
+
+// Fields gets a list of all fields in a struct. The map key is the name of the
+// field (as it appears in the struct) and the key is the field's reflect.Value
+// (which can be used to set a value).
+//
+// This is useful if you want to batch operate on a config struct, for example
+// to override from the environment or flags.
+func Fields(config interface{}) map[string]reflect.Value {
+	r := make(map[string]reflect.Value)
+	v := reflect.ValueOf(config).Elem()
+	t := reflect.TypeOf(config).Elem()
+	for i := 0; i < v.NumField(); i++ {
+		r[t.Field(i).Name] = v.Field(i)
+	}
+
+	return r
 }
 
 func getValues(c interface{}) reflect.Value {
@@ -323,7 +403,12 @@ func setFromTypeHandler(field *reflect.Value, value []string) (bool, error) {
 			return true, err
 		}
 	}
-	field.Set(reflect.ValueOf(v))
+
+	val := reflect.ValueOf(v)
+	if field.Kind() == reflect.Slice {
+		val = reflect.AppendSlice(*field, val)
+	}
+	field.Set(val)
 	return true, nil
 }
 
@@ -331,14 +416,14 @@ func setFromTypeHandler(field *reflect.Value, value []string) (bool, error) {
 //
 // The following paths are checked (in this order):
 //
-//   $XDG_CONFIG/$file
-//   $HOME/.$file
-//   /etc/$file
-//   /usr/local/etc/$file
-//   /usr/pkg/etc/$file
-//   ./$file
+//   $XDG_CONFIG/<file>
+//   $HOME/.<file>
+//   /etc/<file>
+//   /usr/local/etc/<file>
+//   /usr/pkg/etc/<file>
+//   ./<file>
 //
-// The default for $XDG_CONFIG if unset is $HOME/.config
+// The default for $XDG_CONFIG is $HOME/.config if it's not set.
 func FindConfig(file string) string {
 	file = strings.TrimLeft(file, "/")
 

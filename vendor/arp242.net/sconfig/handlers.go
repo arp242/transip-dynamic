@@ -17,8 +17,8 @@ func init() {
 
 func defaultTypeHandlers() {
 	typeHandlers = map[string][]TypeHandler{
-		"string":    {ValidateSingleValue(), handleString},
-		"bool":      {ValidateSingleValue(), handleBool},
+		"string":    {handleString},
+		"bool":      {handleBool},
 		"float32":   {ValidateSingleValue(), handleFloat32},
 		"float64":   {ValidateSingleValue(), handleFloat64},
 		"int64":     {ValidateSingleValue(), handleInt64},
@@ -46,7 +46,7 @@ func handleBool(v []string) (interface{}, error) {
 
 func parseBool(v string) (bool, error) {
 	switch strings.ToLower(v) {
-	case "1", "true", "yes", "on", "enable", "enabled":
+	case "1", "true", "yes", "on", "enable", "enabled", "":
 		return true, nil
 	case "0", "false", "no", "off", "disable", "disabled":
 		return false, nil
