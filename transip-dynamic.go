@@ -1,6 +1,6 @@
 // Copyright © 2016-2017 Martin Tournoij <martin@arp242.net>
 // See the bottom of this file for the full copyright notice.
-package main
+package main // import "arp242.net/transip-dynamic"
 
 import (
 	"bytes"
