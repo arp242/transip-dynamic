@@ -1,5 +1,10 @@
 [![This project is archived](https://img.shields.io/badge/Status-archived-red.svg)](https://arp242.net/status/archived)
 
+**Archived**: this was a quick hack that worked for me at the time. I have not
+used it in years and am not sure if it even works well any more.
+
+---
+
 Dynamic DNS for TransIP.
 
 For a very long time I was a happy [XS4ALL](https://www.xs4all.nl/) customer
